@@ -49,7 +49,7 @@ def _init() -> None:
     )
     # миграция со старой версии базы
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    for col, ddl in (("username", "TEXT"), ("banned", "INTEGER DEFAULT 0"), ("strikes", "INTEGER DEFAULT 0"), ("nsfw", "INTEGER DEFAULT 0")):
+    for col, ddl in (("username", "TEXT"), ("banned", "INTEGER DEFAULT 0"), ("strikes", "INTEGER DEFAULT 0"), ("nsfw", "INTEGER DEFAULT 0"), ("custom_limit", "INTEGER")):
         if col not in cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
 
@@ -81,6 +81,38 @@ def daily_limit() -> int:
         return int(get_setting("daily_limit", DAILY_LIMIT_DEFAULT))
     except (TypeError, ValueError):
         return DAILY_LIMIT_DEFAULT
+
+
+def user_limit(uid: int) -> int:
+    """Лимит конкретного человека: личный, если задан админом, иначе общий. 0 = без лимита."""
+    r = conn.execute("SELECT custom_limit FROM users WHERE user_id=?", (uid,)).fetchone()
+    if r is not None and r["custom_limit"] is not None:
+        return int(r["custom_limit"])
+    return daily_limit()
+
+
+def set_user_limit(uid: int, value: int | None) -> None:
+    """value=None сбрасывает личный лимит (человек снова живёт по общему)."""
+    conn.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (uid,))
+    conn.execute("UPDATE users SET custom_limit=? WHERE user_id=?", (value, uid))
+    conn.commit()
+
+
+def adjust_user_limit(uid: int, delta: int) -> int:
+    """Прибавляет или убавляет лимит от текущего значения человека. Возвращает новый лимит."""
+    current = user_limit(uid)
+    if current <= 0:  # сейчас без лимита: отталкиваемся от общего
+        current = max(daily_limit(), 0)
+    new = max(current + delta, 1)
+    set_user_limit(uid, new)
+    return new
+
+
+def custom_limits() -> list[dict]:
+    rows = conn.execute(
+        "SELECT user_id, username, custom_limit FROM users WHERE custom_limit IS NOT NULL ORDER BY user_id"
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ---------- пользователи ----------
@@ -165,7 +197,7 @@ def stats() -> dict:
 
 def recent_users(n: int = 20) -> list[dict]:
     rows = conn.execute(
-        "SELECT user_id, username, used, day, banned FROM users ORDER BY rowid DESC LIMIT ?", (n,)
+        "SELECT user_id, username, used, day, banned, custom_limit FROM users ORDER BY rowid DESC LIMIT ?", (n,)
     ).fetchall()
     return [dict(r) for r in rows]
 

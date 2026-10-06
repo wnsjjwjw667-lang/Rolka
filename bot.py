@@ -164,7 +164,7 @@ async def cmd_reset(message: Message):
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    n = db.daily_limit()
+    n = db.user_limit(message.from_user.id)
     limit = "без лимита" if n <= 0 else f"{n} сообщений в день"
     text = (
         "/characters — выбрать персонажа\n"
@@ -283,7 +283,7 @@ async def chat(message: Message, bot: Bot):
         await message.answer("Чтобы болтать с персонажами, подпишись на канал 👇", reply_markup=subscribe_keyboard())
         return
 
-    limit = 0 if uid in ADMIN_IDS else db.daily_limit()
+    limit = 0 if uid in ADMIN_IDS else db.user_limit(uid)
     if not db.take_quota(uid, limit):
         await message.answer(f"На сегодня лимит ({limit} сообщений) закончился. Возвращайся завтра 🙂")
         return

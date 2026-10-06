@@ -29,7 +29,11 @@ FIELDS = {
 PANEL_TEXT = (
     "🛠 <b>Админка</b>\n\n"
     "Команды:\n"
-    "/limit 150 — лимит сообщений в день на человека (0 = без лимита)\n"
+    "/limit 150 — общий лимит сообщений в день (0 = без лимита)\n"
+    "/ulimit ID 300 — личный лимит человеку\n"
+    "/ulimit ID +50 — добавить ему 50, /ulimit ID -30 — убавить на 30\n"
+    "/ulimit ID reset — вернуть общий лимит\n"
+    "/ulimits — у кого заданы личные лимиты\n"
     "/users — последние пользователи\n"
     "/ban ID и /unban ID — блокировка\n"
     "/stats — статистика\n"
@@ -138,6 +142,56 @@ async def cmd_limit(message: Message, command: CommandObject):
     await message.answer(f"✅ Лимит теперь: {fmt_limit(int(arg))}")
 
 
+@router.message(Command("ulimit"))
+async def cmd_ulimit(message: Message, command: CommandObject):
+    parts = (command.args or "").split()
+    usage = (
+        "Формат:\n"
+        "/ulimit 123456789 — посмотреть\n"
+        "/ulimit 123456789 300 — задать личный лимит (0 = без лимита)\n"
+        "/ulimit 123456789 +50 — добавить\n"
+        "/ulimit 123456789 -30 — убавить\n"
+        "/ulimit 123456789 reset — вернуть общий лимит"
+    )
+    if not parts or not parts[0].isdigit() or len(parts) > 2:
+        await message.answer(usage)
+        return
+    uid = int(parts[0])
+    if len(parts) == 1:
+        u = db.get_user(uid)
+        if not u:
+            await message.answer("Такого пользователя в базе нет.")
+            return
+        kind = "личный" if u.get("custom_limit") is not None else "общий"
+        await message.answer(f"Пользователь {uid}: {fmt_limit(db.user_limit(uid))} ({kind}).")
+        return
+    arg = parts[1].lower()
+    if arg in ("reset", "off", "сброс"):
+        db.set_user_limit(uid, None)
+        await message.answer(f"✅ {uid}: личный лимит снят, теперь общий: {fmt_limit(db.daily_limit())}")
+    elif arg[0] in "+-" and arg[1:].isdigit():
+        new = db.adjust_user_limit(uid, int(arg))
+        await message.answer(f"✅ {uid}: теперь {fmt_limit(new)}")
+    elif arg.isdigit():
+        db.set_user_limit(uid, int(arg))
+        await message.answer(f"✅ {uid}: теперь {fmt_limit(int(arg))}")
+    else:
+        await message.answer(usage)
+
+
+@router.message(Command("ulimits"))
+async def cmd_ulimits(message: Message):
+    rows = db.custom_limits()
+    if not rows:
+        await message.answer("Личных лимитов нет, у всех общий.")
+        return
+    lines = []
+    for r in rows:
+        name = f"@{r['username']}" if r["username"] else "без username"
+        lines.append(f"{r['user_id']} · {name} · {fmt_limit(r['custom_limit'])}")
+    await message.answer("Личные лимиты:\n\n" + "\n".join(lines))
+
+
 @router.message(Command("users"))
 async def cmd_users(message: Message):
     rows = db.recent_users(20)
@@ -148,7 +202,8 @@ async def cmd_users(message: Message):
     for r in rows:
         name = f"@{r['username']}" if r["username"] else "без username"
         mark = " 🚫" if r["banned"] else ""
-        lines.append(f"{r['user_id']} · {name} · сообщений: {r['used'] or 0}{mark}")
+        lim = f" · лимит {r['custom_limit']}" if r.get("custom_limit") is not None else ""
+        lines.append(f"{r['user_id']} · {name} · сообщений: {r['used'] or 0}{lim}{mark}")
     await message.answer("Последние пользователи:\n\n" + "\n".join(lines))
 
 
