@@ -62,9 +62,15 @@ def panel_kb():
     return kb.as_markup()
 
 
+def _emo(c: dict) -> str:
+    if c.get("emoji_id"):
+        return f'<tg-emoji emoji-id="{c["emoji_id"]}">{html.escape(c["emoji"])}</tg-emoji>'
+    return html.escape(c["emoji"])
+
+
 def card_text(c: dict) -> str:
     return (
-        f"{html.escape(c['emoji'])} <b>{html.escape(c['name'])}</b> (id {c['id']})\n\n"
+        f"{_emo(c)}{' (премиум)' if c.get('emoji_id') else ''} <b>{html.escape(c['name'])}</b> (id {c['id']})\n\n"
         f"<b>Описание:</b> {html.escape(c['tagline'])}\n\n"
         f"<b>Приветствие:</b> {html.escape(c['greeting'])}\n\n"
         f"<b>Характер:</b> {html.escape(c['persona'])}"
@@ -79,6 +85,14 @@ def card_kb(cid: int):
     kb.button(text="⬅️ Назад", callback_data="adm:list")
     kb.adjust(2)
     return kb.as_markup()
+
+
+def custom_emoji_id(message: Message) -> str:
+    """ID премиум-эмодзи из сообщения (пустая строка, если эмодзи обычное)."""
+    for e in message.entities or []:
+        if e.type == "custom_emoji" and e.custom_emoji_id:
+            return e.custom_emoji_id
+    return ""
 
 
 def fmt_limit(n: int) -> str:
@@ -348,6 +362,8 @@ async def edit_value(message: Message, state: FSMContext):
         await message.answer(err)
         return
     db.update_character(cid, field, text)
+    if field == "emoji":  # премиум-эмодзи запоминаем отдельно, обычное сбрасывает прежний id
+        db.update_character(cid, "emoji_id", custom_emoji_id(message))
     await state.clear()
     c = db.get_character(cid)
     await message.answer("✅ Сохранено.\n\n" + card_text(c), reply_markup=card_kb(cid), parse_mode="HTML")
@@ -362,7 +378,7 @@ async def add_name(message: Message, state: FSMContext):
         return
     await state.update_data(name=text)
     await state.set_state(AddChar.emoji)
-    await message.answer("Шаг 2/5. Пришли <b>эмодзи</b> для кнопки, например 🎸", parse_mode="HTML")
+    await message.answer("Шаг 2/5. Пришли <b>эмодзи</b> для кнопки, например 🎸 (можно премиум-эмодзи)", parse_mode="HTML")
 
 
 @router.message(AddChar.emoji, F.text)
@@ -372,7 +388,7 @@ async def add_emoji(message: Message, state: FSMContext):
     if err:
         await message.answer(err)
         return
-    await state.update_data(emoji=text)
+    await state.update_data(emoji=text, emoji_id=custom_emoji_id(message))
     await state.set_state(AddChar.tagline)
     await message.answer(
         "Шаг 3/5. Пришли <b>короткое описание</b> для меню, например: Бариста, 26. Добрый и с юмором.",
@@ -416,7 +432,9 @@ async def add_persona(message: Message, state: FSMContext):
         await message.answer(err)
         return
     data = await state.get_data()
-    cid = db.add_character(data["name"], data["emoji"], data["tagline"], data["greeting"], text)
+    cid = db.add_character(
+        data["name"], data["emoji"], data["tagline"], data["greeting"], text, data.get("emoji_id", "")
+    )
     await state.clear()
     c = db.get_character(cid)
     await message.answer(
