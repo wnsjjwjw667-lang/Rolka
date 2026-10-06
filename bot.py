@@ -4,7 +4,7 @@ import logging
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BotCommand, CallbackQuery, Message
+from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, Message, WebAppInfo
 from aiogram.utils.chat_action import ChatActionSender
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -18,6 +18,8 @@ from config import ADMIN_IDS, BOT_TOKEN, CHANNEL_URL, HISTORY_LIMIT, REQUIRED_CH
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("bot")
 
+WEB_URL = os.getenv("WEB_URL", "")  # адрес сайта берётся из переменных окружения; пусто = кнопка скрыта
+
 router = Router()
 router.message.filter(F.chat.type == "private")
 
@@ -29,6 +31,8 @@ def characters_keyboard():
     for c in db.list_characters():
         kb.button(text=f"{c['emoji']} {c['name']}", callback_data=f"char:{c['id']}")
     kb.adjust(2)
+    if WEB_URL:
+        kb.row(InlineKeyboardButton(text="🌐 Открыть сайт", web_app=WebAppInfo(url=WEB_URL)))
     return kb.as_markup()
 
 
@@ -124,6 +128,16 @@ async def cmd_characters(message: Message):
     await show_menu(message)
 
 
+@router.message(Command("site"))
+async def cmd_site(message: Message):
+    if not WEB_URL:
+        await message.answer("Сайт сейчас недоступен.")
+        return
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="🌐 Открыть сайт", web_app=WebAppInfo(url=WEB_URL)))
+    await message.answer("Все персонажи на сайте 👇", reply_markup=kb.as_markup())
+
+
 @router.message(Command("mode"))
 async def cmd_mode(message: Message):
     u = db.touch_user(message.from_user.id, message.from_user.username)
@@ -169,6 +183,7 @@ async def cmd_help(message: Message):
     limit = "без лимита" if n <= 0 else f"{n} сообщений в день"
     text = (
         "/characters — выбрать персонажа\n"
+        "/site — открыть сайт\n"
         "/mode — режим 18+ (вкл/выкл)\n"
         "/reset — очистить память диалога\n"
         f"Лимит: {limit}.\n\n"
@@ -329,6 +344,7 @@ async def main():
     await bot.set_my_commands(
         [
             BotCommand(command="characters", description="Выбрать персонажа"),
+            BotCommand(command="site", description="Открыть сайт"),
             BotCommand(command="mode", description="Режим 18+"),
             BotCommand(command="reset", description="Очистить память диалога"),
             BotCommand(command="help", description="Помощь"),
