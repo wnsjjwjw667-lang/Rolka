@@ -76,6 +76,35 @@ def _client(p: dict):
     return p["client"]
 
 
+_ACTION = re.compile(r"(^|[.!?…]\s|\n)\*[^*\n]{2,}\*[ \t]*")
+
+
+_CHECKIN = re.compile(
+    r"не буду настаивать|не стану настаивать|уже устал[аи]?\b|устал[аи]? от (?:игры|меня|этого|разговора|общения)|тебе надоело|"
+    r"хочешь (?:остановиться|прекратить|закончить)|если (?:тебе )?(?:неприятно|некомфортно|не хочешь)|"
+    r"скажи[,]? (?:стоп|если)|можем остановиться|я не давлю",
+    re.I,
+)
+_SENT = re.compile(r"(?<=[.!?…)])\s+")
+
+
+def clean_reply(text: str) -> str:
+    """Чистит ответ модели: действия в звёздочках, пояснения в скобках в конце и дежурные «ты не устал? я не буду настаивать»."""
+    t = _ACTION.sub(r"\1", text)
+    t = re.sub(r"\*([^*\n]+)\*", r"\1", t).replace("*", "")
+    # последний абзац целиком в скобках: это пояснение от модели, а не реплика
+    paras = [p for p in re.split(r"\n\s*\n", t) if p.strip()]
+    if len(paras) > 1 and paras[-1].strip().startswith("(") and paras[-1].strip().endswith(")"):
+        t = "\n\n".join(paras[:-1])
+    # дежурные проверки «не устал ли ты» в хвосте: срезаем с конца, пока есть что оставить
+    sents = _SENT.split(t.strip())
+    while len(sents) > 1 and _CHECKIN.search(sents[-1]):
+        sents.pop()
+    t = " ".join(sents) if len(sents) > 1 else (sents[0] if sents else t)
+    t = re.sub(r"[ \t]{2,}", " ", t).strip()
+    return t or text.replace("*", "").strip()
+
+
 async def _call(p: dict, system: str, messages: list[dict]) -> str:
     client = _client(p)
     if p["kind"] == "anthropic":
@@ -123,9 +152,9 @@ async def generate(system: str, messages: list[dict], nsfw: bool = False) -> str
                 log.info("Модель %s отказалась, пробую следующую", p["model"])
                 refused_reply = refused_reply or reply
                 continue
-            return reply
+            return clean_reply(reply)
     if refused_reply:
-        return refused_reply
+        return clean_reply(refused_reply)
     if last_exc:
         raise last_exc
     return ""

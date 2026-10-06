@@ -1,5 +1,4 @@
 import sqlite3
-import time
 from datetime import date
 
 from characters import CHARACTERS as DEFAULT_CHARACTERS
@@ -8,7 +7,7 @@ from config import DAILY_LIMIT_DEFAULT, DB_PATH
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 
-CHAR_FIELDS = ("name", "emoji", "emoji_id", "tagline", "greeting", "persona")
+CHAR_FIELDS = ("name", "emoji", "tagline", "greeting", "persona")
 
 
 def _row(r):
@@ -50,14 +49,9 @@ def _init() -> None:
     )
     # миграция со старой версии базы
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    for col, ddl in (("username", "TEXT"), ("banned", "INTEGER DEFAULT 0"), ("strikes", "INTEGER DEFAULT 0"), ("nsfw", "INTEGER DEFAULT 0"), ("custom_limit", "INTEGER"), ("last_chat", "INTEGER")):
+    for col, ddl in (("username", "TEXT"), ("banned", "INTEGER DEFAULT 0"), ("strikes", "INTEGER DEFAULT 0"), ("nsfw", "INTEGER DEFAULT 0"), ("custom_limit", "INTEGER")):
         if col not in cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
-
-    # миграция: id премиум-эмодзи персонажа (для иконки на кнопке)
-    ccols = {r["name"] for r in conn.execute("PRAGMA table_info(characters)")}
-    if "emoji_id" not in ccols:
-        conn.execute("ALTER TABLE characters ADD COLUMN emoji_id TEXT DEFAULT ''")
 
     # стартовые персонажи из characters.py кладутся один раз
     if get_setting("seeded") is None:
@@ -211,27 +205,9 @@ def recent_users(n: int = 20) -> list[dict]:
 # ---------- история диалога ----------
 
 def set_character(uid: int, char_id: int) -> None:
-    conn.execute("UPDATE users SET character=?, last_chat=? WHERE user_id=?", (str(char_id), int(time.time()), uid))
+    conn.execute("UPDATE users SET character=? WHERE user_id=?", (str(char_id), uid))
     conn.execute("DELETE FROM messages WHERE user_id=?", (uid,))
     conn.commit()
-
-
-def clear_character(uid: int) -> None:
-    """Снимает выбранного персонажа: бот перестаёт отвечать ИИ, пока не выберут нового."""
-    conn.execute("UPDATE users SET character=NULL WHERE user_id=?", (uid,))
-    conn.commit()
-
-
-def touch_chat(uid: int) -> None:
-    """Запоминает момент последнего сообщения в диалоге с персонажем."""
-    conn.execute("UPDATE users SET last_chat=? WHERE user_id=?", (int(time.time()), uid))
-    conn.commit()
-
-
-def last_chat(uid: int):
-    """Unix-время последнего сообщения в диалоге или None."""
-    r = conn.execute("SELECT last_chat FROM users WHERE user_id=?", (uid,)).fetchone()
-    return r["last_chat"] if r else None
 
 
 def clear_history(uid: int) -> None:
@@ -280,10 +256,10 @@ def get_character(cid):
     return _row(conn.execute("SELECT * FROM characters WHERE id=?", (cid,)).fetchone())
 
 
-def add_character(name: str, emoji: str, tagline: str, greeting: str, persona: str, emoji_id: str = "") -> int:
+def add_character(name: str, emoji: str, tagline: str, greeting: str, persona: str) -> int:
     cur = conn.execute(
-        "INSERT INTO characters (name, emoji, emoji_id, tagline, greeting, persona) VALUES (?,?,?,?,?,?)",
-        (name, emoji, emoji_id or "", tagline, greeting, persona),
+        "INSERT INTO characters (name, emoji, tagline, greeting, persona) VALUES (?,?,?,?,?)",
+        (name, emoji, tagline, greeting, persona),
     )
     conn.commit()
     return cur.lastrowid

@@ -1,0 +1,67 @@
+# Скопируй этот файл в .env (или перенеси строки в переменные хостинга) и впиши свои значения.
+# Строки с # в начале выключены. Убери # и впиши ключ, чтобы включить провайдера.
+# После любых правок перезапусти бота.
+
+BOT_TOKEN=
+ADMIN_IDS=
+
+# ================= ОСНОВНАЯ МОДЕЛЬ (Gemini) =================
+LLM_PROVIDER=openai
+LLM_API_KEY=
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_MODEL=gemini-3.8-flash
+
+# ================= ЗАПАСНЫЕ (бот идёт по номерам сверху вниз, до 10 штук) =================
+# Формат: base_url|ключ|модель  (ровно две черты |, без пробелов и кавычек)
+# Если провайдер упал, он на 5 минут уходит в конец очереди (LLM_COOLDOWN), а бот идёт к следующему.
+
+# --- Gemini с тем же ключом: у каждой модели свой суточный лимит (ключ тот же, что в LLM_API_KEY) ---
+# Flash-модели: ~20 запросов в день каждая
+LLM_FALLBACK_1=https://generativelanguage.googleapis.com/v1beta/openai/|КЛЮЧ_GEMINI|gemini-3.5-flash
+# Flash-Lite: ~500 запросов в день каждая, это основной запас
+LLM_FALLBACK_2=https://generativelanguage.googleapis.com/v1beta/openai/|КЛЮЧ_GEMINI|gemini-3.5-flash-lite
+LLM_FALLBACK_3=https://generativelanguage.googleapis.com/v1beta/openai/|КЛЮЧ_GEMINI|gemini-3.1-flash-lite
+# Gemma: ~14 400 запросов в день, но маленький лимит токенов в минуту. Если в логах ошибка 400
+# про системные инструкции (system/developer instruction), просто удали эту строку.
+LLM_FALLBACK_4=https://generativelanguage.googleapis.com/v1beta/openai/|КЛЮЧ_GEMINI|gemma-4-31b-it
+
+# --- Другие сервисы ---
+# Mistral (бесплатный тариф Experiment, нужен номер телефона). ~1 запрос в секунду.
+LLM_FALLBACK_5=https://api.mistral.ai/v1|КЛЮЧ_MISTRAL|mistral-small-latest
+# OpenRouter: все бесплатные модели делят общий лимит ~50 запросов в день без пополнения
+LLM_FALLBACK_6=https://openrouter.ai/api/v1|КЛЮЧ_OPENROUTER|openrouter/free
+# NVIDIA NIM (ключ на build.nvidia.com, нужен номер телефона), ~40 запросов в минуту.
+# Точное имя модели возьми на build.nvidia.com/models
+LLM_FALLBACK_7=https://integrate.api.nvidia.com/v1|КЛЮЧ_NVIDIA|meta/llama-3.3-70b-instruct
+
+# --- Если получится зарегистрироваться (у части сервисов просят карту или блокируют регионы) ---
+# Groq (console.groq.com): gpt-oss-120b, ~1000 запросов в день
+# LLM_FALLBACK_8=https://api.groq.com/openai/v1|КЛЮЧ_GROQ|openai/gpt-oss-120b
+# Cerebras (cloud.cerebras.ai): gpt-oss-120b, ~1 млн токенов в день
+# LLM_FALLBACK_9=https://api.cerebras.ai/v1|КЛЮЧ_CEREBRAS|gpt-oss-120b
+# Cloudflare Workers AI: вместо ACCOUNT_ID впиши ID аккаунта, ключ это API-токен с правом Workers AI
+# LLM_FALLBACK_10=https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/v1|ТОКЕН|@cf/openai/gpt-oss-120b
+
+# ================= ПРОЧЕЕ =================
+LLM_MAX_TOKENS=1000
+# Сколько запросов к моделям одновременно (Mistral пускает примерно 1 в секунду)
+LLM_CONCURRENCY=2
+# На сколько секунд упавший провайдер уходит в конец очереди
+LLM_COOLDOWN=300
+
+# ---- Лимиты людей ----
+DAILY_LIMIT=100
+HISTORY_LIMIT=20
+
+# ---- Подписка на канал ----
+REQUIRED_CHANNEL=@Recenp
+CHANNEL_URL=https://t.me/Recenp
+
+# ---- Веб-версия (сайт с персонажами) ----
+# 1 = сайт включён, 0 = выключен. Порт хостинг обычно сам задаёт в переменной PORT.
+WEB_ENABLED=1
+# Сколько сообщений в сутки можно отправить с сайта с одного IP и со всего сайта (чтобы не съесть квоту бота)
+WEB_IP_LIMIT=15
+WEB_GLOBAL_LIMIT=300
+# Ссылка на твоего бота в Telegram, покажется на сайте (необязательно)
+WEB_TG_URL=
