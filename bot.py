@@ -1,6 +1,8 @@
 import asyncio
+import html
 import os
 import logging
+import time
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -14,7 +16,7 @@ import db
 import llm
 import safety
 from characters import BASE_PROMPT
-from config import ADMIN_IDS, BOT_TOKEN, CHANNEL_URL, HISTORY_LIMIT, REQUIRED_CHANNEL
+from config import ADMIN_IDS, AUTO_STOP_HOURS, BOT_TOKEN, CHANNEL_URL, HISTORY_LIMIT, REQUIRED_CHANNEL
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("bot")
@@ -42,13 +44,20 @@ def characters_keyboard(icons: bool = True):
     return kb.as_markup()
 
 
+def emo(c: dict) -> str:
+    """Эмодзи персонажа для текста: премиум через <tg-emoji>, иначе обычное."""
+    if c.get("emoji_id"):
+        return f'<tg-emoji emoji-id="{c["emoji_id"]}">{html.escape(c["emoji"])}</tg-emoji>'
+    return html.escape(c["emoji"])
+
+
 def characters_text() -> str:
     chars = db.list_characters()
     if not chars:
         return "Персонажей пока нет, загляни позже."
     lines = ["Выбери, с кем хочешь поболтать:\n"]
     for c in chars:
-        lines.append(f"{c['emoji']} <b>{c['name']}</b> — {c['tagline']}")
+        lines.append(f"{emo(c)} <b>{html.escape(c['name'])}</b> — {html.escape(c['tagline'])}")
     return "\n".join(lines)
 
 
@@ -189,7 +198,14 @@ async def cmd_nsfw_all(message: Message):
 @router.message(Command("reset"))
 async def cmd_reset(message: Message):
     db.clear_history(message.from_user.id)
-    await message.answer("Память диалога очищена. Можем начать заново 🙂")
+    db.clear_character(message.from_user.id)
+    await answer_with_menu(message, "Память диалога очищена. Выбери персонажа:")
+
+
+@router.message(Command("stop"))
+async def cmd_stop(message: Message):
+    db.clear_character(message.from_user.id)
+    await message.answer("Ок, молчу. Чтобы продолжить, выбери персонажа: /characters")
 
 
 @router.message(Command("help"))
@@ -201,6 +217,7 @@ async def cmd_help(message: Message):
         "/site — открыть сайт\n"
         "/mode — режим 18+ (вкл/выкл)\n"
         "/reset — очистить память диалога\n"
+        "/stop — остановить персонажа\n"
         f"Лимит: {limit}.\n\n"
         "Все персонажи вымышленные, отвечает ИИ."
     )
@@ -270,7 +287,20 @@ async def cb_character(call: CallbackQuery):
     db.add_message(uid, "user", "(начало разговора)")
     db.add_message(uid, "assistant", c["greeting"])
     await call.answer()
-    await call.message.answer(f"{c['emoji']} <b>{c['name']}</b>\n\n{c['greeting']}", parse_mode="HTML")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏹ Остановить", callback_data="stop")
+    await call.message.answer(
+        f"{emo(c)} <b>{html.escape(c['name'])}</b>\n\n{html.escape(c['greeting'])}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "stop")
+async def cb_stop(call: CallbackQuery):
+    db.clear_character(call.from_user.id)
+    await call.answer("Остановлено")
+    await call.message.edit_reply_markup(reply_markup=None)
 
 
 # ---------- диалог ----------
@@ -310,6 +340,18 @@ async def chat(message: Message, bot: Bot):
     if not c:
         await answer_with_menu(message, "Сначала выбери персонажа:")
         return
+
+    # автоостановка: если долго не писали, персонаж уходит и сам больше не отвечает
+    if AUTO_STOP_HOURS > 0:
+        last = db.last_chat(uid)
+        if last is None:
+            db.touch_chat(uid)
+        elif time.time() - last > AUTO_STOP_HOURS * 3600:
+            db.clear_character(uid)
+            await answer_with_menu(
+                message, f"Ты давно не писал(а), поэтому {c['name']} ушёл. Выбери, с кем поболтать:"
+            )
+            return
     if not await is_subscribed(bot, uid):
         await message.answer("Чтобы болтать с персонажами, подпишись на канал 👇", reply_markup=subscribe_keyboard())
         return
@@ -340,6 +382,7 @@ async def chat(message: Message, bot: Bot):
         return
 
     db.add_message(uid, "assistant", reply)
+    db.touch_chat(uid)
     await message.answer(reply[:4000])
 
 
@@ -362,6 +405,7 @@ async def main():
             BotCommand(command="site", description="Открыть сайт"),
             BotCommand(command="mode", description="Режим 18+"),
             BotCommand(command="reset", description="Очистить память диалога"),
+            BotCommand(command="stop", description="Остановить персонажа"),
             BotCommand(command="help", description="Помощь"),
         ]
     )

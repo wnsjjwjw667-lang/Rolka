@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from datetime import date
 
 from characters import CHARACTERS as DEFAULT_CHARACTERS
@@ -49,7 +50,7 @@ def _init() -> None:
     )
     # миграция со старой версии базы
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    for col, ddl in (("username", "TEXT"), ("banned", "INTEGER DEFAULT 0"), ("strikes", "INTEGER DEFAULT 0"), ("nsfw", "INTEGER DEFAULT 0"), ("custom_limit", "INTEGER")):
+    for col, ddl in (("username", "TEXT"), ("banned", "INTEGER DEFAULT 0"), ("strikes", "INTEGER DEFAULT 0"), ("nsfw", "INTEGER DEFAULT 0"), ("custom_limit", "INTEGER"), ("last_chat", "INTEGER")):
         if col not in cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
 
@@ -210,9 +211,27 @@ def recent_users(n: int = 20) -> list[dict]:
 # ---------- история диалога ----------
 
 def set_character(uid: int, char_id: int) -> None:
-    conn.execute("UPDATE users SET character=? WHERE user_id=?", (str(char_id), uid))
+    conn.execute("UPDATE users SET character=?, last_chat=? WHERE user_id=?", (str(char_id), int(time.time()), uid))
     conn.execute("DELETE FROM messages WHERE user_id=?", (uid,))
     conn.commit()
+
+
+def clear_character(uid: int) -> None:
+    """Снимает выбранного персонажа: бот перестаёт отвечать ИИ, пока не выберут нового."""
+    conn.execute("UPDATE users SET character=NULL WHERE user_id=?", (uid,))
+    conn.commit()
+
+
+def touch_chat(uid: int) -> None:
+    """Запоминает момент последнего сообщения в диалоге с персонажем."""
+    conn.execute("UPDATE users SET last_chat=? WHERE user_id=?", (int(time.time()), uid))
+    conn.commit()
+
+
+def last_chat(uid: int):
+    """Unix-время последнего сообщения в диалоге или None."""
+    r = conn.execute("SELECT last_chat FROM users WHERE user_id=?", (uid,)).fetchone()
+    return r["last_chat"] if r else None
 
 
 def clear_history(uid: int) -> None:

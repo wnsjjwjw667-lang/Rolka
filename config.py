@@ -21,6 +21,8 @@ ADMIN_IDS = _ids(os.getenv("ADMIN_IDS", ""))
 # Стартовый лимит сообщений в день на человека. Потом меняется в боте командой /limit
 DAILY_LIMIT_DEFAULT = int(os.getenv("DAILY_LIMIT", "100"))
 HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "20"))
+# Через сколько часов молчания персонаж сам останавливается (0 = не останавливать)
+AUTO_STOP_HOURS = float(os.getenv("AUTO_STOP_HOURS", "2"))
 
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "").strip()
 CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/Recenp")

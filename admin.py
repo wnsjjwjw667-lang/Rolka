@@ -62,9 +62,15 @@ def panel_kb():
     return kb.as_markup()
 
 
+def _emo(c: dict) -> str:
+    if c.get("emoji_id"):
+        return f'<tg-emoji emoji-id="{c["emoji_id"]}">{html.escape(c["emoji"])}</tg-emoji>'
+    return html.escape(c["emoji"])
+
+
 def card_text(c: dict) -> str:
     return (
-        f"{html.escape(c['emoji'])}{' (премиум)' if c.get('emoji_id') else ''} <b>{html.escape(c['name'])}</b> (id {c['id']})\n\n"
+        f"{_emo(c)}{' (премиум)' if c.get('emoji_id') else ''} <b>{html.escape(c['name'])}</b> (id {c['id']})\n\n"
         f"<b>Описание:</b> {html.escape(c['tagline'])}\n\n"
         f"<b>Приветствие:</b> {html.escape(c['greeting'])}\n\n"
         f"<b>Характер:</b> {html.escape(c['persona'])}"
