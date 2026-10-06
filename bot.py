@@ -3,6 +3,7 @@ import os
 import logging
 
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, Message, WebAppInfo
 from aiogram.utils.chat_action import ChatActionSender
@@ -26,10 +27,15 @@ router.message.filter(F.chat.type == "private")
 
 # ---------- вспомогательное ----------
 
-def characters_keyboard():
+def characters_keyboard(icons: bool = True):
+    """icons=True: у персонажей с премиум-эмодзи оно ставится иконкой на кнопку."""
     kb = InlineKeyboardBuilder()
     for c in db.list_characters():
-        kb.button(text=f"{c['emoji']} {c['name']}", callback_data=f"char:{c['id']}")
+        eid = (c.get("emoji_id") or "") if icons else ""
+        if eid:
+            kb.button(text=c["name"], callback_data=f"char:{c['id']}", icon_custom_emoji_id=eid)
+        else:
+            kb.button(text=f"{c['emoji']} {c['name']}", callback_data=f"char:{c['id']}")
     kb.adjust(2)
     if WEB_URL:
         kb.row(InlineKeyboardButton(text="🌐 Открыть сайт", web_app=WebAppInfo(url=WEB_URL)))
@@ -61,8 +67,17 @@ def mode_keyboard():
     return kb.as_markup()
 
 
+async def answer_with_menu(message: Message, text: str, **kw):
+    """Отправляет текст с кнопками персонажей. Если Telegram не принял премиум-иконки, шлёт обычные."""
+    try:
+        await message.answer(text, reply_markup=characters_keyboard(True), **kw)
+    except TelegramBadRequest as e:
+        log.warning("Премиум-иконки на кнопках не приняты, шлю обычные: %s", e)
+        await message.answer(text, reply_markup=characters_keyboard(False), **kw)
+
+
 async def show_menu(message: Message):
-    await message.answer(characters_text(), reply_markup=characters_keyboard(), parse_mode="HTML")
+    await answer_with_menu(message, characters_text(), parse_mode="HTML")
 
 
 async def is_subscribed(bot: Bot, uid: int) -> bool:
@@ -293,7 +308,7 @@ async def chat(message: Message, bot: Bot):
 
     c = db.get_character(u["character"])
     if not c:
-        await message.answer("Сначала выбери персонажа:", reply_markup=characters_keyboard())
+        await answer_with_menu(message, "Сначала выбери персонажа:")
         return
     if not await is_subscribed(bot, uid):
         await message.answer("Чтобы болтать с персонажами, подпишись на канал 👇", reply_markup=subscribe_keyboard())

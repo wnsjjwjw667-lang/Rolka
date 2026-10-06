@@ -7,7 +7,7 @@ from config import DAILY_LIMIT_DEFAULT, DB_PATH
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 
-CHAR_FIELDS = ("name", "emoji", "tagline", "greeting", "persona")
+CHAR_FIELDS = ("name", "emoji", "emoji_id", "tagline", "greeting", "persona")
 
 
 def _row(r):
@@ -52,6 +52,11 @@ def _init() -> None:
     for col, ddl in (("username", "TEXT"), ("banned", "INTEGER DEFAULT 0"), ("strikes", "INTEGER DEFAULT 0"), ("nsfw", "INTEGER DEFAULT 0"), ("custom_limit", "INTEGER")):
         if col not in cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
+
+    # миграция: id премиум-эмодзи персонажа (для иконки на кнопке)
+    ccols = {r["name"] for r in conn.execute("PRAGMA table_info(characters)")}
+    if "emoji_id" not in ccols:
+        conn.execute("ALTER TABLE characters ADD COLUMN emoji_id TEXT DEFAULT ''")
 
     # стартовые персонажи из characters.py кладутся один раз
     if get_setting("seeded") is None:
@@ -256,10 +261,10 @@ def get_character(cid):
     return _row(conn.execute("SELECT * FROM characters WHERE id=?", (cid,)).fetchone())
 
 
-def add_character(name: str, emoji: str, tagline: str, greeting: str, persona: str) -> int:
+def add_character(name: str, emoji: str, tagline: str, greeting: str, persona: str, emoji_id: str = "") -> int:
     cur = conn.execute(
-        "INSERT INTO characters (name, emoji, tagline, greeting, persona) VALUES (?,?,?,?,?)",
-        (name, emoji, tagline, greeting, persona),
+        "INSERT INTO characters (name, emoji, emoji_id, tagline, greeting, persona) VALUES (?,?,?,?,?,?)",
+        (name, emoji, emoji_id or "", tagline, greeting, persona),
     )
     conn.commit()
     return cur.lastrowid
