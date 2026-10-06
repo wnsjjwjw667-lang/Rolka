@@ -1,4 +1,5 @@
 import asyncio
+import os
 import logging
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -334,6 +335,9 @@ async def main():
         ]
     )
     await bot.delete_webhook(drop_pending_updates=True)
+    if os.getenv("WEB_ENABLED", "1") == "1":
+        import webapp  # сайт с каталогом персонажей, живёт в одном процессе с ботом
+        await webapp.start()
     log.info("Бот запущен")
     await dp.start_polling(bot)
 
