@@ -23,7 +23,9 @@ log = logging.getLogger("web")
 
 IP_LIMIT = int(os.getenv("WEB_IP_LIMIT", "15"))          # сообщений в сутки с одного IP
 GLOBAL_LIMIT = int(os.getenv("WEB_GLOBAL_LIMIT", "300"))  # сообщений в сутки с сайта всего, чтобы не съесть квоту бота
-INDEX = Path(__file__).with_name("static") / "index.html"
+# index.html лежит в корне репозитория рядом с webapp.py; если его перенесут в static/, найдём и там
+_here = Path(__file__).parent
+INDEX = _here / "index.html" if (_here / "index.html").exists() else _here / "static" / "index.html"
 _used: dict = {}  # {(день, ip или "*"): сколько}
 
 
@@ -51,7 +53,14 @@ def _refund(ip: str) -> None:
 
 
 async def index(request):
+    if not INDEX.exists():
+        log.error("Нет файла %s", INDEX)
+        return web.Response(text=f"index.html not found: {INDEX}", status=500)
     return web.FileResponse(INDEX, headers={"Content-Type": "text/html; charset=utf-8"})
+
+
+async def health(request):
+    return web.Response(text="ok")
 
 
 async def characters(request):
@@ -104,9 +113,14 @@ async def chat(request):
 
 async def start() -> None:
     app = web.Application(client_max_size=64 * 1024)
-    app.add_routes([web.get("/", index), web.get("/api/characters", characters), web.post("/api/chat", chat)])
+    app.add_routes([
+        web.get("/", index),
+        web.get("/health", health),
+        web.get("/api/characters", characters),
+        web.post("/api/chat", chat),
+    ])
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", "8080"))
     await web.TCPSite(runner, "0.0.0.0", port).start()
-    log.info("Сайт запущен на порту %d", port)
+    log.info("Сайт запущен на порту %d (index: %s, найден: %s)", port, INDEX, INDEX.exists())
