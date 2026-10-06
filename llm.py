@@ -88,7 +88,16 @@ async def _call(p: dict, system: str, messages: list[dict]) -> str:
         max_tokens=MAX_TOKENS,
         messages=[{"role": "system", "content": system}, *messages],
     )
-    return (resp.choices[0].message.content or "").strip()
+    # Gemini иногда отвечает 200, но без текста (сработал фильтр безопасности или кончились токены на размышления)
+    choice = resp.choices[0] if getattr(resp, "choices", None) else None
+    msg = getattr(choice, "message", None)
+    text = (getattr(msg, "content", None) or "").strip()
+    if not text:
+        log.info(
+            "Модель %s вернула пустой ответ (finish_reason=%s), пробую следующую",
+            p["model"], getattr(choice, "finish_reason", None),
+        )
+    return text
 
 
 async def generate(system: str, messages: list[dict], nsfw: bool = False) -> str:
