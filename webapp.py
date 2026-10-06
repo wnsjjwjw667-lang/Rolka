@@ -1,7 +1,20 @@
-"""Веб-версия бота: каталог персонажей и чат в браузере. Запускается вместе с ботом (WEB_ENABLED=0 выключает)."""
+"""Веб-версия бота: каталог персонажей и чат в браузере. Запускается вместе с ботом (WEB_ENABLED=0 выключает).
+
+Переменные окружения:
+  WEB_ENABLED     1/0  - включить/выключить сайт (по умолчанию 1)
+  PORT            порт сайта (по умолчанию 8080)
+  WEB_TG_URL      ссылка на Telegram-бота для шапки сайта
+  WEB_IP_LIMIT    сообщений в сутки с одного IP (по умолчанию 15)
+  WEB_GLOBAL_LIMIT сообщений в сутки со всего сайта (по умолчанию 300)
+  TUNNEL          1 - поднять Cloudflare-туннель и получить https-ссылку (по умолчанию 0)
+"""
+import asyncio
 import logging
 import os
+import platform
+import re
 import time
+import urllib.request
 from pathlib import Path
 
 from aiohttp import web
@@ -94,6 +107,42 @@ async def chat(request):
     return web.json_response({"reply": reply[:4000]})
 
 
+# ---------- https-ссылка через Cloudflare Tunnel ----------
+
+def _cloudflared_url() -> str:
+    """Выбирает нужную сборку cloudflared под процессор сервера."""
+    arch = platform.machine().lower()
+    name = "cloudflared-linux-arm64" if arch in ("aarch64", "arm64") else "cloudflared-linux-amd64"
+    return f"https://github.com/cloudflare/cloudflared/releases/latest/download/{name}"
+
+
+async def tunnel(port: int) -> None:
+    """Скачивает cloudflared (один раз), запускает туннель и пишет https-ссылку в лог."""
+    path = Path(__file__).with_name("cloudflared")
+    try:
+        if not path.exists():
+            log.warning("Скачиваю cloudflared...")
+            await asyncio.to_thread(urllib.request.urlretrieve, _cloudflared_url(), str(path))
+            path.chmod(0o755)
+
+        proc = await asyncio.create_subprocess_exec(
+            str(path), "tunnel", "--url", f"http://localhost:{port}", "--no-autoupdate",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        found = False
+        async for line in proc.stderr:
+            m = re.search(rb"https://[a-z0-9-]+\.trycloudflare\.com", line)
+            if m and not found:
+                found = True
+                log.warning("=" * 50)
+                log.warning("САЙТ ДОСТУПЕН ПО ССЫЛКЕ: %s", m.group().decode())
+                log.warning("=" * 50)
+        log.warning("Туннель остановился (код %s)", await proc.wait())
+    except Exception as e:
+        log.warning("Не удалось запустить туннель: %s", e)
+
+
 async def start() -> None:
     app = web.Application(client_max_size=64 * 1024)
     app.add_routes([web.get("/", index), web.get("/api/characters", characters), web.post("/api/chat", chat)])
@@ -102,3 +151,5 @@ async def start() -> None:
     port = int(os.getenv("PORT", "8080"))
     await web.TCPSite(runner, "0.0.0.0", port).start()
     log.info("Сайт запущен на порту %d", port)
+    if os.getenv("TUNNEL", "0") == "1":
+        asyncio.create_task(tunnel(port))
