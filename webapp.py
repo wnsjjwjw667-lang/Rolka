@@ -51,7 +51,7 @@ def _refund(ip: str) -> None:
 
 
 async def index(request):
-    return web.FileResponse(INDEX)
+    return web.FileResponse(INDEX, headers={"Content-Type": "text/html; charset=utf-8"})
 
 
 async def characters(request):
