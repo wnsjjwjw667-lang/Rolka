@@ -1,6 +1,6 @@
 """Обёртка над языковой моделью с цепочкой запасных провайдеров.
 
-Основной провайдер задаётся LLM_*, запасные: LLM_FALLBACK_1 ... LLM_FALLBACK_5
+Основной провайдер задаётся LLM_*, запасные: LLM_FALLBACK_1 ... LLM_FALLBACK_10
 в формате  base_url|api_key|model . Если у одного кончился бесплатный лимит, он упал
 или (в режиме 18+) модель отказалась отвечать, бот пробует следующий.
 Работает с любым OpenAI-совместимым API и с Claude (LLM_PROVIDER=anthropic для основного)."""
@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 
 log = logging.getLogger("llm")
 
@@ -20,14 +21,18 @@ BASE_URL = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/
 MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1000"))
 
 # не больше N запросов к API одновременно, чтобы не упираться в лимиты бесплатного тарифа
-_sem = asyncio.Semaphore(int(os.getenv("LLM_CONCURRENCY", "4")))
+_sem = asyncio.Semaphore(int(os.getenv("LLM_CONCURRENCY", "2")))
+
+# если провайдер выдал ошибку (лимит, ключ, модель пропала), на столько секунд он уходит в конец очереди,
+# чтобы не тратить время на заведомо мёртвый вариант при каждом сообщении
+COOLDOWN_SEC = int(os.getenv("LLM_COOLDOWN", "300"))
 
 
 def _build_providers() -> list[dict]:
     provs = []
     if API_KEY and MODEL:
         provs.append({"kind": PROVIDER, "key": API_KEY, "model": MODEL, "base": BASE_URL})
-    for i in range(1, 6):
+    for i in range(1, 11):
         raw = os.getenv(f"LLM_FALLBACK_{i}", "").strip()
         if not raw:
             continue
@@ -63,11 +68,11 @@ def _client(p: dict):
         if p["kind"] == "anthropic":
             from anthropic import AsyncAnthropic
 
-            p["client"] = AsyncAnthropic(api_key=p["key"])
+            p["client"] = AsyncAnthropic(api_key=p["key"], max_retries=0)
         else:
             from openai import AsyncOpenAI
 
-            p["client"] = AsyncOpenAI(api_key=p["key"], base_url=p["base"])
+            p["client"] = AsyncOpenAI(api_key=p["key"], base_url=p["base"], max_retries=0)
     return p["client"]
 
 
@@ -90,13 +95,19 @@ async def generate(system: str, messages: list[dict], nsfw: bool = False) -> str
     last_exc: Exception | None = None
     refused_reply = ""
     async with _sem:
-        for p in PROVIDERS:
+        now = time.monotonic()
+        # сначала те, кто не в паузе, в конце те, кто недавно падал (вдруг уже ожили)
+        ready = [p for p in PROVIDERS if p.get("until", 0) <= now]
+        resting = [p for p in PROVIDERS if p.get("until", 0) > now]
+        for p in ready + resting:
             try:
                 reply = await _call(p, system, messages)
             except Exception as e:  # лимит, сеть, модель пропала: идём к следующему
-                log.warning("Провайдер %s (%s) не ответил: %s", p["base"], p["model"], e)
+                log.warning("Провайдер %s (%s) не ответил: %s", p["base"], p["model"], str(e)[:300])
+                p["until"] = time.monotonic() + COOLDOWN_SEC
                 last_exc = e
                 continue
+            p["until"] = 0
             if not reply:
                 continue
             if nsfw and looks_like_refusal(reply):
